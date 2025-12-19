@@ -4,27 +4,130 @@ import { useState, useEffect } from "react"
 import { OfferForm } from "@/components/offer-form"
 import { OfferCard } from "@/components/offer-card"
 import type { Offer } from "@/lib/types"
-import { Tag, Download } from "lucide-react"
+import { Tag, Download, Printer } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import html2canvas from "html2canvas"
 import { useToast } from "@/hooks/use-toast"
+import { db } from "@/lib/firebase"
+import { collection, deleteDoc, doc, getDocs, setDoc, writeBatch } from "firebase/firestore"
 
 export default function Home() {
   const { toast } = useToast()
   const [offers, setOffers] = useState<Offer[]>([])
   const [selectedOffers, setSelectedOffers] = useState<Set<string>>(new Set())
+  const [searchTerm, setSearchTerm] = useState("")
+  const [userId, setUserId] = useState<string | null>(null)
+
+  const printA4Images = async (images: string[]) => {
+    const iframe = document.createElement("iframe")
+    iframe.style.position = "fixed"
+    iframe.style.right = "0"
+    iframe.style.bottom = "0"
+    iframe.style.width = "0"
+    iframe.style.height = "0"
+    iframe.style.border = "0"
+    iframe.setAttribute("aria-hidden", "true")
+    document.body.appendChild(iframe)
+
+    const printDoc = iframe.contentDocument
+    if (!printDoc) {
+      document.body.removeChild(iframe)
+      return
+    }
+
+    printDoc.open()
+    printDoc.write("<!doctype html><html><head><meta charset='utf-8'><title>Impressão A4</title></head><body></body></html>")
+    printDoc.close()
+
+    const style = printDoc.createElement("style")
+    style.textContent = `
+      @page { size: A4; margin: 0; }
+      html, body { margin: 0; padding: 0; background: white; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      img { width: 210mm; height: 297mm; display: block; page-break-after: always; }
+      img:last-child { page-break-after: auto; }
+    `
+    printDoc.head.appendChild(style)
+
+    const loadPromises: Promise<void>[] = []
+    images.forEach((src) => {
+      const img = printDoc.createElement("img")
+      img.src = src
+      loadPromises.push(
+        new Promise<void>((resolve) => {
+          img.onload = () => resolve()
+          img.onerror = () => resolve()
+        }),
+      )
+      printDoc.body.appendChild(img)
+    })
+
+    await Promise.all(loadPromises)
+    await new Promise<void>((resolve) => setTimeout(resolve, 150))
+
+    const win = iframe.contentWindow
+    if (!win) {
+      document.body.removeChild(iframe)
+      return
+    }
+
+    const cleanup = () => {
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe)
+    }
+
+    win.onafterprint = cleanup
+    win.focus()
+    win.print()
+
+    setTimeout(cleanup, 10_000)
+  }
 
   useEffect(() => {
+    const userKey = "firebase-anon-user-id"
+    const existingUserId = localStorage.getItem(userKey)
+    const nextUserId =
+      existingUserId ??
+      (typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`)
+
+    if (!existingUserId) localStorage.setItem(userKey, nextUserId)
+    setUserId(nextUserId)
+
     const savedOffers = localStorage.getItem("promotional-offers")
-    if (savedOffers) {
-      try {
-        const parsed = JSON.parse(savedOffers)
-        setOffers(parsed)
-      } catch (error) {
-        console.error("Erro ao carregar ofertas salvas:", error)
-      }
+    if (!savedOffers) return
+    try {
+      const parsed = JSON.parse(savedOffers)
+      setOffers(parsed)
+    } catch (error) {
+      console.error("Erro ao carregar ofertas salvas:", error)
     }
   }, [])
+
+  useEffect(() => {
+    if (!userId) return
+
+    const load = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, "users", userId, "offers"))
+        const remoteOffers: Offer[] = snapshot.docs
+          .map((d) => {
+            const data = d.data() as Omit<Offer, "id">
+            return { ...data, id: d.id }
+          })
+          .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+
+        if (remoteOffers.length === 0) return
+
+        setOffers(remoteOffers)
+        localStorage.setItem("promotional-offers", JSON.stringify(remoteOffers))
+      } catch (error) {
+        console.error("Erro ao carregar ofertas do Firebase:", error)
+      }
+    }
+
+    void load()
+  }, [userId])
 
   useEffect(() => {
     if (offers.length > 0) {
@@ -36,10 +139,30 @@ export default function Home() {
 
   const handleAddOffer = (offer: Offer) => {
     setOffers((prev) => [offer, ...prev])
+    if (!userId) return
+    void setDoc(doc(db, "users", userId, "offers", offer.id), offer).catch(() => {
+      toast({
+        title: "Falha ao salvar no Firebase",
+        description: "Sua oferta foi salva localmente, mas não sincronizou.",
+        variant: "destructive",
+      })
+    })
   }
 
   const handleAddMultipleOffers = (newOffers: Offer[]) => {
     setOffers((prev) => [...newOffers, ...prev])
+    if (!userId) return
+    const batch = writeBatch(db)
+    newOffers.forEach((offer) => {
+      batch.set(doc(db, "users", userId, "offers", offer.id), offer)
+    })
+    void batch.commit().catch(() => {
+      toast({
+        title: "Falha ao salvar no Firebase",
+        description: "As ofertas foram salvas localmente, mas não sincronizaram.",
+        variant: "destructive",
+      })
+    })
   }
 
   const handleDeleteOffer = (id: string) => {
@@ -48,6 +171,26 @@ export default function Home() {
       const newSet = new Set(prev)
       newSet.delete(id)
       return newSet
+    })
+    if (!userId) return
+    void deleteDoc(doc(db, "users", userId, "offers", id)).catch(() => {
+      toast({
+        title: "Falha ao remover no Firebase",
+        description: "A oferta foi removida localmente, mas não sincronizou.",
+        variant: "destructive",
+      })
+    })
+  }
+
+  const handleUpdateOffer = (updated: Offer) => {
+    setOffers((prev) => prev.map((offer) => (offer.id === updated.id ? updated : offer)))
+    if (!userId) return
+    void setDoc(doc(db, "users", userId, "offers", updated.id), updated, { merge: true }).catch(() => {
+      toast({
+        title: "Falha ao atualizar no Firebase",
+        description: "A oferta foi atualizada localmente, mas não sincronizou.",
+        variant: "destructive",
+      })
     })
   }
 
@@ -63,8 +206,20 @@ export default function Home() {
     })
   }
 
+  const filteredOffers = offers.filter((offer) => {
+    if (!searchTerm.trim()) return true
+    const query = searchTerm.toLowerCase()
+    return (
+      offer.productName.toLowerCase().includes(query) ||
+      offer.unit.toLowerCase().includes(query) ||
+      offer.price.toLowerCase().includes(query) ||
+      (offer.extraText ? offer.extraText.toLowerCase().includes(query) : false)
+    )
+  })
+
   const selectAllOffers = () => {
-    setSelectedOffers(new Set(offers.map((offer) => offer.id)))
+    const source = searchTerm.trim() ? filteredOffers : offers
+    setSelectedOffers(new Set(source.map((offer) => offer.id)))
   }
 
   const clearAllSelections = () => {
@@ -83,7 +238,6 @@ export default function Home() {
 
     const selectedOffersList = offers.filter((offer) => selectedOffers.has(offer.id))
 
-    // Group offers in pairs for A4 pages
     const pages: Offer[][] = []
     for (let i = 0; i < selectedOffersList.length; i += 2) {
       pages.push(selectedOffersList.slice(i, i + 2))
@@ -98,7 +252,6 @@ export default function Home() {
     for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
       const pageOffers = pages[pageIndex]
 
-      // Create temporary container for the A4 page
       const container = document.createElement("div")
       container.style.width = "210mm"
       container.style.minHeight = "297mm"
@@ -107,32 +260,47 @@ export default function Home() {
       container.style.flexDirection = "column"
       container.style.position = "absolute"
       container.style.left = "-9999px"
+      container.style.padding = "24px"
       document.body.appendChild(container)
 
-      // Add each offer to the page
-      for (const offer of pageOffers) {
-        const offerElement = document.getElementById(`offer-${offer.id}`)
-        if (offerElement) {
-          const clone = offerElement.cloneNode(true) as HTMLElement
-          clone.style.flex = "1"
-          clone.style.display = "flex"
-          clone.style.justifyContent = "center"
-          clone.style.alignItems = "center"
-          container.appendChild(clone)
-        }
+      const createSlot = () => {
+        const slot = document.createElement("div")
+        slot.style.flex = "1"
+        slot.style.display = "flex"
+        slot.style.alignItems = "center"
+        slot.style.justifyContent = "center"
+        slot.style.width = "100%"
+        return slot
       }
 
-      // If only one offer, add divider
-      if (pageOffers.length === 1) {
-        const divider = document.createElement("div")
-        divider.style.flex = "1"
-        divider.style.borderTop = "2px dashed #ccc"
-        container.appendChild(divider)
-      } else {
-        // Add divider between two offers
-        const firstOffer = container.children[0] as HTMLElement
-        firstOffer.style.borderBottom = "2px dashed #ccc"
+      const appendBadge = (offer: Offer, slot: HTMLDivElement) => {
+        const badgeElement = document.getElementById(`offer-badge-${offer.id}`)
+        if (!badgeElement) return
+        const scale = 1.35
+        const clone = badgeElement.cloneNode(true) as HTMLElement
+        clone.id = `offer-badge-${offer.id}-page-${pageIndex}`
+        clone.style.width = `${100 / scale}%`
+        clone.style.height = `${100 / scale}%`
+        clone.style.display = "flex"
+        clone.style.alignItems = "center"
+        clone.style.justifyContent = "center"
+        clone.style.transform = `scale(${scale})`
+        clone.style.transformOrigin = "center"
+        slot.appendChild(clone)
       }
+
+      const top = createSlot()
+      appendBadge(pageOffers[0], top)
+      container.appendChild(top)
+
+      const divider = document.createElement("div")
+      divider.style.borderTop = "2px dashed #ccc"
+      divider.style.margin = "24px 0"
+      container.appendChild(divider)
+
+      const bottom = createSlot()
+      if (pageOffers[1]) appendBadge(pageOffers[1], bottom)
+      container.appendChild(bottom)
 
       // Generate image
       const canvas = await html2canvas(container, {
@@ -140,6 +308,28 @@ export default function Home() {
         backgroundColor: "#ffffff",
         width: 794, // A4 width in pixels at 96 DPI
         height: 1123, // A4 height in pixels at 96 DPI
+        onclone: (clonedDoc) => {
+          const root = clonedDoc.documentElement
+          root.style.setProperty("--background", "#ffffff")
+          root.style.setProperty("--foreground", "#111827")
+          root.style.setProperty("--card", "#ffffff")
+          root.style.setProperty("--card-foreground", "#111827")
+          root.style.setProperty("--popover", "#ffffff")
+          root.style.setProperty("--popover-foreground", "#111827")
+          root.style.setProperty("--primary", "#dc2626")
+          root.style.setProperty("--primary-foreground", "#ffffff")
+          root.style.setProperty("--secondary", "#fde68a")
+          root.style.setProperty("--secondary-foreground", "#111827")
+          root.style.setProperty("--muted", "#f3f4f6")
+          root.style.setProperty("--muted-foreground", "#6b7280")
+          root.style.setProperty("--accent", "#fde68a")
+          root.style.setProperty("--accent-foreground", "#111827")
+          root.style.setProperty("--destructive", "#ef4444")
+          root.style.setProperty("--destructive-foreground", "#ffffff")
+          root.style.setProperty("--border", "#e5e7eb")
+          root.style.setProperty("--input", "#e5e7eb")
+          root.style.setProperty("--ring", "#dc2626")
+        },
       })
 
       // Download
@@ -156,6 +346,118 @@ export default function Home() {
       title: "Download concluído!",
       description: `${pages.length} página(s) A4 baixada(s) com sucesso.`,
     })
+  }
+
+  const handlePrintSelected = async () => {
+    if (selectedOffers.size === 0) {
+      toast({
+        title: "Nenhuma oferta selecionada",
+        description: "Selecione pelo menos uma oferta para imprimir.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const selectedOffersList = offers.filter((offer) => selectedOffers.has(offer.id))
+    const pages: Offer[][] = []
+    for (let i = 0; i < selectedOffersList.length; i += 2) {
+      pages.push(selectedOffersList.slice(i, i + 2))
+    }
+
+    toast({
+      title: "Preparando impressão...",
+      description: `Renderizando ${pages.length} página(s) A4...`,
+    })
+
+    const images: string[] = []
+
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+      const pageOffers = pages[pageIndex]
+
+      const container = document.createElement("div")
+      container.style.width = "210mm"
+      container.style.minHeight = "297mm"
+      container.style.background = "white"
+      container.style.display = "flex"
+      container.style.flexDirection = "column"
+      container.style.position = "absolute"
+      container.style.left = "-9999px"
+      container.style.padding = "24px"
+      document.body.appendChild(container)
+
+      const createSlot = () => {
+        const slot = document.createElement("div")
+        slot.style.flex = "1"
+        slot.style.display = "flex"
+        slot.style.alignItems = "center"
+        slot.style.justifyContent = "center"
+        slot.style.width = "100%"
+        return slot
+      }
+
+      const appendBadge = (offer: Offer, slot: HTMLDivElement) => {
+        const badgeElement = document.getElementById(`offer-badge-${offer.id}`)
+        if (!badgeElement) return
+        const scale = 1.35
+        const clone = badgeElement.cloneNode(true) as HTMLElement
+        clone.id = `offer-badge-${offer.id}-print-${pageIndex}`
+        clone.style.width = `${100 / scale}%`
+        clone.style.height = `${100 / scale}%`
+        clone.style.display = "flex"
+        clone.style.alignItems = "center"
+        clone.style.justifyContent = "center"
+        clone.style.transform = `scale(${scale})`
+        clone.style.transformOrigin = "center"
+        slot.appendChild(clone)
+      }
+
+      const top = createSlot()
+      appendBadge(pageOffers[0], top)
+      container.appendChild(top)
+
+      const divider = document.createElement("div")
+      divider.style.borderTop = "2px dashed #ccc"
+      divider.style.margin = "24px 0"
+      container.appendChild(divider)
+
+      const bottom = createSlot()
+      if (pageOffers[1]) appendBadge(pageOffers[1], bottom)
+      container.appendChild(bottom)
+
+      const canvas = await html2canvas(container, {
+        scale: 2,
+        backgroundColor: "#ffffff",
+        width: 794,
+        height: 1123,
+        onclone: (clonedDoc) => {
+          const root = clonedDoc.documentElement
+          root.style.setProperty("--background", "#ffffff")
+          root.style.setProperty("--foreground", "#111827")
+          root.style.setProperty("--card", "#ffffff")
+          root.style.setProperty("--card-foreground", "#111827")
+          root.style.setProperty("--popover", "#ffffff")
+          root.style.setProperty("--popover-foreground", "#111827")
+          root.style.setProperty("--primary", "#dc2626")
+          root.style.setProperty("--primary-foreground", "#ffffff")
+          root.style.setProperty("--secondary", "#fde68a")
+          root.style.setProperty("--secondary-foreground", "#111827")
+          root.style.setProperty("--muted", "#f3f4f6")
+          root.style.setProperty("--muted-foreground", "#6b7280")
+          root.style.setProperty("--accent", "#fde68a")
+          root.style.setProperty("--accent-foreground", "#111827")
+          root.style.setProperty("--destructive", "#ef4444")
+          root.style.setProperty("--destructive-foreground", "#ffffff")
+          root.style.setProperty("--border", "#e5e7eb")
+          root.style.setProperty("--input", "#e5e7eb")
+          root.style.setProperty("--ring", "#dc2626")
+        },
+      })
+
+      images.push(canvas.toDataURL("image/png"))
+      document.body.removeChild(container)
+    }
+
+    await printA4Images(images)
   }
 
   return (
@@ -183,7 +485,7 @@ export default function Home() {
 
           {/* Grid de cartazes */}
           <div>
-            <div className="mb-6 flex items-center justify-between">
+            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-2xl font-bold text-gray-900">Suas Ofertas</h2>
                 <p className="text-sm text-gray-600">
@@ -193,9 +495,20 @@ export default function Home() {
               </div>
 
               {offers.length > 0 && (
-                <div className="flex gap-2">
-                  {selectedOffers.size === offers.length ? (
-                    <Button variant="outline" size="sm" onClick={clearAllSelections}>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <div className="w-full sm:w-64">
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Buscar por produto, preço, texto..."
+                      className="w-full rounded-md border-2 border-gray-300 bg-white px-3 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-red-500"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 justify-end">
+                    {selectedOffers.size === offers.length ? (
+                      <Button variant="outline" size="sm" onClick={clearAllSelections}>
                       Desmarcar todas
                     </Button>
                   ) : (
@@ -204,11 +517,18 @@ export default function Home() {
                     </Button>
                   )}
                   {selectedOffers.size > 0 && (
-                    <Button size="sm" onClick={handleDownloadSelected} className="bg-red-600 hover:bg-red-700">
-                      <Download className="mr-2 h-4 w-4" />
-                      Baixar A4 ({selectedOffers.size})
-                    </Button>
+                    <>
+                      <Button size="sm" variant="outline" onClick={handlePrintSelected}>
+                        <Printer className="mr-2 h-4 w-4" />
+                        Imprimir A4 ({selectedOffers.size})
+                      </Button>
+                      <Button size="sm" onClick={handleDownloadSelected} className="bg-red-600 hover:bg-red-700">
+                        <Download className="mr-2 h-4 w-4" />
+                        Baixar A4 ({selectedOffers.size})
+                      </Button>
+                    </>
                   )}
+                </div>
                 </div>
               )}
             </div>
@@ -221,11 +541,12 @@ export default function Home() {
               </div>
             ) : (
               <div className="grid gap-6 sm:grid-cols-2">
-                {offers.map((offer) => (
+                {filteredOffers.map((offer) => (
                   <OfferCard
                     key={offer.id}
                     offer={offer}
                     onDelete={handleDeleteOffer}
+                    onUpdate={handleUpdateOffer}
                     selected={selectedOffers.has(offer.id)}
                     onToggleSelect={() => toggleOfferSelection(offer.id)}
                   />

@@ -4,4 +4,5 @@ export interface Offer {
   price: string
   unit: string
   createdAt: string
+  extraText?: string
 }

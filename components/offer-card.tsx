@@ -2,22 +2,95 @@
 
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import type { Offer } from "@/lib/types"
-import { Download, Trash2 } from "lucide-react"
+import { Check, Download, Pencil, Trash2, X } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Checkbox } from "@/components/ui/checkbox"
 
 interface OfferCardProps {
   offer: Offer
   onDelete: (id: string) => void
+  onUpdate?: (offer: Offer) => void
   selected?: boolean
   onToggleSelect?: () => void
 }
 
-export function OfferCard({ offer, onDelete, selected = false, onToggleSelect }: OfferCardProps) {
+export function OfferBadge({ offer }: { offer: Offer }) {
+  const sanitizedPrice = offer.price.replace(/[^\d,]/g, "")
+  const [reais, centavos] = sanitizedPrice.split(",")
+
+  return (
+    <Card
+      className="w-full rounded-3xl border-[10px] shadow-2xl py-0 gap-0 overflow-visible"
+      style={{ backgroundColor: "#facc15", borderColor: "#facc15" }}
+    >
+      <div className="relative p-3">
+        <div className="offer-badge absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-[35%]">
+          <div className="relative">
+            <svg width="240" height="80" viewBox="0 0 280 100" className="drop-shadow-lg">
+              <path
+                d="M 20 10 L 260 10 L 280 50 L 260 90 L 20 90 L 40 50 Z"
+                fill="#DC2626"
+                stroke="#B91C1C"
+                strokeWidth="3"
+              />
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span
+                className="relative -top-[14px] inline-block translate-x-[10px] text-4xl font-black text-white tracking-widest leading-none"
+                style={{ textShadow: "2px 2px 4px rgba(0,0,0,0.3)" }}
+              >
+                OFERTA
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="border-[6px] rounded-2xl p-6 pt-8 min-h-[300px] flex flex-col items-center justify-center overflow-hidden"
+          style={{ borderColor: "#dc2626", backgroundColor: "#facc15" }}
+        >
+          <div className="text-center mb-3 w-full">
+            <h3 className="text-2xl font-black text-black uppercase leading-tight">{offer.productName}</h3>
+          </div>
+
+          <div className="flex items-end justify-center gap-2 w-full">
+            <span className="text-4xl font-black text-black leading-none">R$</span>
+            <span className="text-[104px] font-black text-black leading-none tracking-tighter">{reais || "0"}</span>
+            <div className="flex flex-col items-start leading-none pb-2">
+              <span className="text-4xl font-black text-black leading-none">,{centavos || "00"}</span>
+              <span className="text-3xl font-black text-black leading-none mt-1">{offer.unit}</span>
+            </div>
+          </div>
+          {offer.extraText && (
+            <div className="mt-10 w-full text-center">
+              <p className="text-2xl font-black text-black leading-tight uppercase">{offer.extraText}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+export function OfferCard({ offer, onDelete, onUpdate, selected = false, onToggleSelect }: OfferCardProps) {
   const { toast } = useToast()
   const cardRef = useRef<HTMLDivElement>(null)
+  const [isEditing, setIsEditing] = useState(false)
+  const [draftName, setDraftName] = useState(offer.productName)
+  const [draftPrice, setDraftPrice] = useState(offer.price)
+  const [draftUnit, setDraftUnit] = useState(offer.unit)
+  const [draftExtraText, setDraftExtraText] = useState(offer.extraText ?? "")
+
+  useEffect(() => {
+    if (isEditing) return
+    setDraftName(offer.productName)
+    setDraftPrice(offer.price)
+    setDraftUnit(offer.unit)
+    setDraftExtraText(offer.extraText ?? "")
+  }, [isEditing, offer.extraText, offer.price, offer.productName, offer.unit])
 
   const handleDownload = async () => {
     if (!cardRef.current) return
@@ -27,8 +100,28 @@ export function OfferCard({ offer, onDelete, selected = false, onToggleSelect }:
       const canvas = await html2canvas(cardRef.current, {
         scale: 3,
         backgroundColor: "#ffffff",
-        width: 794,
-        height: 1123,
+        onclone: (clonedDoc) => {
+          const root = clonedDoc.documentElement
+          root.style.setProperty("--background", "#ffffff")
+          root.style.setProperty("--foreground", "#111827")
+          root.style.setProperty("--card", "#ffffff")
+          root.style.setProperty("--card-foreground", "#111827")
+          root.style.setProperty("--popover", "#ffffff")
+          root.style.setProperty("--popover-foreground", "#111827")
+          root.style.setProperty("--primary", "#dc2626")
+          root.style.setProperty("--primary-foreground", "#ffffff")
+          root.style.setProperty("--secondary", "#fde68a")
+          root.style.setProperty("--secondary-foreground", "#111827")
+          root.style.setProperty("--muted", "#f3f4f6")
+          root.style.setProperty("--muted-foreground", "#6b7280")
+          root.style.setProperty("--accent", "#fde68a")
+          root.style.setProperty("--accent-foreground", "#111827")
+          root.style.setProperty("--destructive", "#ef4444")
+          root.style.setProperty("--destructive-foreground", "#ffffff")
+          root.style.setProperty("--border", "#e5e7eb")
+          root.style.setProperty("--input", "#e5e7eb")
+          root.style.setProperty("--ring", "#dc2626")
+        },
       })
 
       const link = document.createElement("a")
@@ -57,68 +150,65 @@ export function OfferCard({ offer, onDelete, selected = false, onToggleSelect }:
     })
   }
 
-  const [reais, centavos] = offer.price.split(",")
+  const handleStartEdit = () => {
+    setDraftName(offer.productName)
+    setDraftPrice(offer.price)
+    setDraftUnit(offer.unit)
+    setDraftExtraText(offer.extraText ?? "")
+    setIsEditing(true)
+  }
 
-  const OfferBadge = () => (
-    <Card className="overflow-hidden border-8 border-yellow-400 bg-yellow-400 shadow-2xl rounded-3xl w-full">
-      <div className="relative">
-        <div className="absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-3">
-          <div className="relative">
-            <svg width="240" height="80" viewBox="0 0 280 100" className="drop-shadow-lg">
-              <path
-                d="M 20 10 L 260 10 L 280 50 L 260 90 L 20 90 L 40 50 Z"
-                fill="#DC2626"
-                stroke="#B91C1C"
-                strokeWidth="3"
-              />
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span
-                className="text-3xl font-black text-white tracking-wider"
-                style={{ textShadow: "2px 2px 4px rgba(0,0,0,0.3)" }}
-              >
-                OFERTA
-              </span>
-            </div>
-          </div>
-        </div>
+  const handleCancelEdit = () => {
+    setDraftName(offer.productName)
+    setDraftPrice(offer.price)
+    setDraftUnit(offer.unit)
+    setDraftExtraText(offer.extraText ?? "")
+    setIsEditing(false)
+  }
 
-        <div className="border-4 border-red-600 bg-yellow-400 rounded-2xl p-6 pt-14 min-h-[260px] flex flex-col items-center justify-center">
-          <div className="text-center mb-4">
-            <h3 className="text-xl font-black text-black uppercase leading-tight">{offer.productName}</h3>
-          </div>
+  const handleSaveEdit = () => {
+    const nextName = draftName.trim()
+    const nextPrice = draftPrice.trim()
+    const nextUnit = draftUnit.trim()
+     const nextExtraText = draftExtraText.trim()
 
-          <div className="flex items-start justify-center gap-1">
-            <span className="text-3xl font-black text-black mt-2">R$</span>
-            <span className="text-[100px] font-black text-black leading-none tracking-tighter">{reais || "0"}</span>
-            <div className="flex flex-col items-start mt-2">
-              <span className="text-4xl font-black text-black leading-none">,{centavos || "00"}</span>
-              <span className="text-3xl font-black text-black leading-none mt-1">{offer.unit}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Card>
-  )
+    if (!nextName || !nextPrice || !nextUnit) {
+      toast({
+        title: "Campos obrigatórios",
+        description: "Preencha nome, preço e unidade.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    onUpdate?.({
+      ...offer,
+      productName: nextName,
+      price: nextPrice,
+      unit: nextUnit,
+      extraText: nextExtraText || undefined,
+    })
+    setIsEditing(false)
+  }
 
   return (
     <div className="space-y-4">
       <div className="relative">
+        <div className="fixed -left-[9999px] top-0">
+          <div id={`offer-badge-${offer.id}`}>
+            <OfferBadge offer={offer} />
+          </div>
+        </div>
+
         <div
           id={`offer-${offer.id}`}
           ref={cardRef}
-          className={`bg-white p-8 w-full transition-all ${selected ? "ring-4 ring-red-500 ring-offset-2" : ""}`}
-          style={{ aspectRatio: "210/297" }}
+          className="bg-white p-6 w-full transition-all"
+          style={{
+            boxShadow: selected ? "0 0 0 4px #ef4444, 0 0 0 6px #ffffff" : undefined,
+          }}
         >
-          <div className="flex flex-col gap-8 h-full">
-            <div className="flex-1">
-              <OfferBadge />
-            </div>
-            <div className="border-t-2 border-dashed border-gray-400" />
-            <div className="flex-1">
-              <OfferBadge />
-            </div>
-          </div>
+          <OfferBadge offer={offer} />
         </div>
 
         {onToggleSelect && (
@@ -134,6 +224,62 @@ export function OfferCard({ offer, onDelete, selected = false, onToggleSelect }:
         )}
       </div>
 
+      {onUpdate && (
+        <div className="rounded-md border-2 border-gray-200 bg-white p-3">
+          {isEditing ? (
+            <div className="space-y-2">
+              <Input
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                className="border-2 border-gray-300 font-bold"
+              />
+              <Input
+                value={draftExtraText}
+                onChange={(e) => setDraftExtraText(e.target.value)}
+                placeholder="Texto opcional abaixo do preço"
+                className="border-2 border-gray-300 text-sm"
+              />
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="flex items-center gap-2">
+                  <div className="text-sm font-bold text-gray-700">R$</div>
+                  <Input
+                    value={draftPrice}
+                    onChange={(e) => setDraftPrice(e.target.value)}
+                    className="border-2 border-gray-300"
+                  />
+                </div>
+                <select
+                  value={draftUnit}
+                  onChange={(e) => setDraftUnit(e.target.value)}
+                  className="flex h-10 w-full rounded-md border-2 border-gray-300 bg-white px-3 py-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="UND">UND</option>
+                  <option value="KG">KG</option>
+                  <option value="L">L</option>
+                  <option value="PCT">PCT</option>
+                  <option value="CX">CX</option>
+                  <option value="FARDO">FARDO</option>
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={handleSaveEdit} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold">
+                  <Check className="mr-2 h-4 w-4" />
+                  Salvar
+                </Button>
+                <Button onClick={handleCancelEdit} variant="outline" className="font-bold">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button onClick={handleStartEdit} variant="outline" className="w-full font-bold">
+              <Pencil className="mr-2 h-4 w-4" />
+              Editar (nome, preço, und)
+            </Button>
+          )}
+        </div>
+      )}
+
       <div className="flex gap-2">
         <Button
           onClick={handleDownload}
@@ -141,7 +287,7 @@ export function OfferCard({ offer, onDelete, selected = false, onToggleSelect }:
           size="lg"
         >
           <Download className="mr-2 h-4 w-4" />
-          Baixar A4
+          Baixar
         </Button>
         <Button onClick={handleDelete} variant="destructive" size="lg" className="font-bold">
           <Trash2 className="h-4 w-4" />
