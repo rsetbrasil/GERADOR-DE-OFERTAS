@@ -170,7 +170,7 @@ export function OfferCard({ offer, onDelete, onUpdate, selected = false, onToggl
     const nextName = draftName.trim()
     const nextPrice = draftPrice.trim()
     const nextUnit = draftUnit.trim()
-     const nextExtraText = draftExtraText.trim()
+    const nextExtraText = draftExtraText.trim()
 
     if (!nextName || !nextPrice || !nextUnit) {
       toast({
@@ -181,13 +181,20 @@ export function OfferCard({ offer, onDelete, onUpdate, selected = false, onToggl
       return
     }
 
-    onUpdate?.({
+    const updatedOffer: Offer = {
       ...offer,
       productName: nextName,
       price: nextPrice,
       unit: nextUnit,
-      extraText: nextExtraText || undefined,
-    })
+    }
+
+    if (nextExtraText) {
+      updatedOffer.extraText = nextExtraText
+    } else {
+      delete (updatedOffer as any).extraText
+    }
+
+    onUpdate?.(updatedOffer)
     setIsEditing(false)
   }
 

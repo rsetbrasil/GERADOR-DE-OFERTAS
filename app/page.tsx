@@ -143,8 +143,111 @@ export default function Home() {
       }
     }
 
+    const importDefaultList = async (force = false) => {
+      try {
+        if (!force) {
+          const snapshot = await getDocs(collection(db, "offers"))
+          if (!snapshot.empty) return
+        }
+
+        const { productsList } = await import("@/lib/products-data")
+        const lines = productsList.trim().split("\n")
+        const offers: Offer[] = []
+        let inferredUnit = "UND"
+
+        const inferUnitFromHeader = (header: string, currentUnit: string) => {
+          if (/\bCAIXA\b/i.test(header)) return "CX"
+          if (/\bLATAS\b/i.test(header)) return "PCT"
+          if (/\bFARDO\b/i.test(header)) return "FARDO"
+          return currentUnit
+        }
+
+        const parsePrice = (text: string) => {
+          const match = text.match(/R\$\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})|\d+(?:[.,]\d+)?)/)
+          return match?.[1] ?? null
+        }
+
+        lines.forEach((line, index) => {
+          const trimmedLine = line.trim()
+          if (!trimmedLine) return
+
+          if (!trimmedLine.includes("R$")) {
+            inferredUnit = inferUnitFromHeader(trimmedLine, inferredUnit)
+            return
+          }
+
+          if (trimmedLine.includes("—") && trimmedLine.includes("R$")) {
+            const parts = trimmedLine.split("—").map((p) => p.trim())
+            if (parts.length >= 2) {
+              const productName = parts[0]
+              const price = parsePrice(parts[1])
+
+              if (price) {
+                offers.push({
+                  id: `${Date.now()}-${index}`,
+                  productName: productName,
+                  price,
+                  unit: inferredUnit,
+                  createdAt: new Date().toISOString(),
+                })
+              }
+            }
+          }
+        })
+
+        if (offers.length > 0) {
+          toast({
+             title: "Iniciando importação...",
+             description: `Preparando ${offers.length} produtos para importação.`,
+          })
+          
+          const chunkSize = 10
+          const chunks = []
+          for (let i = 0; i < offers.length; i += chunkSize) {
+            chunks.push(offers.slice(i, i + chunkSize))
+          }
+
+          let importedCount = 0
+          for (const chunk of chunks) {
+            const batch = writeBatch(db)
+            chunk.forEach((offer) => {
+              batch.set(doc(db, "offers", offer.id), offer)
+            })
+            await batch.commit()
+            importedCount += chunk.length
+            // Increased delay to 500ms to avoid rate limiting and connection issues
+            await new Promise((resolve) => setTimeout(resolve, 500))
+          }
+
+          toast({
+            title: "Lista importada!",
+            description: `${importedCount} produtos foram adicionados ao banco de dados.`,
+          })
+        }
+      } catch (error) {
+        console.error("Erro ao importar lista padrão:", error)
+        toast({
+          title: "Erro na importação",
+          description: "Ocorreu um erro ao tentar importar os produtos. Verifique o console.",
+          variant: "destructive",
+        })
+      }
+    }
+
     void migrateFromUserCollection()
-  }, [userId])
+    void importDefaultList()
+    // Expose for manual triggering if needed (temporary)
+    // @ts-ignore
+    window.forceImportProducts = () => importDefaultList(true)
+  }, [userId, toast])
+
+  const handleManualImport = async () => {
+    // @ts-ignore
+    if (window.forceImportProducts) {
+       // @ts-ignore
+       await window.forceImportProducts()
+    }
+  }
 
   const handleAddOffer = (offer: Offer) => {
     setOffers((prev) => [offer, ...prev])
@@ -543,6 +646,9 @@ export default function Home() {
                 <Tag className="mx-auto h-12 w-12 text-gray-400" />
                 <h3 className="mt-4 text-lg font-semibold text-gray-900">Nenhuma oferta ainda</h3>
                 <p className="mt-2 text-sm text-gray-600">Crie sua primeira oferta usando o formulário ao lado</p>
+                <Button variant="outline" className="mt-6" onClick={handleManualImport}>
+                  Importar Lista Padrão de Produtos
+                </Button>
               </div>
             ) : (
               <div className="grid gap-6 sm:grid-cols-2">

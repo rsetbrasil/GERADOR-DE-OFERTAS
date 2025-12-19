@@ -1,7 +1,8 @@
 "use client"
 
-import { initializeApp, getApps } from "firebase/app"
+import { initializeApp, getApps, getApp } from "firebase/app"
 import { getFirestore } from "firebase/firestore"
+import { getAnalytics, isSupported } from "firebase/analytics"
 
 const firebaseConfig = {
   apiKey: "AIzaSyAWNcpxKR_hqwBiqFa0cg8L35LedxoPhaQ",
@@ -13,7 +14,20 @@ const firebaseConfig = {
   measurementId: "G-PQV7NGL01Q",
 }
 
-const app = getApps().length ? getApps()[0]! : initializeApp(firebaseConfig)
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig)
+const db = getFirestore(app)
 
-export const db = getFirestore(app)
+let analytics
+if (typeof window !== "undefined") {
+  isSupported().then((supported) => {
+    if (supported) {
+      try {
+        analytics = getAnalytics(app)
+      } catch (error) {
+        console.warn("Analytics not initialized:", error)
+      }
+    }
+  }).catch(console.error)
+}
 
+export { db, app, analytics }

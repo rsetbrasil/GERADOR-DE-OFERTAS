@@ -97,13 +97,15 @@ export function OfferForm({ onAddOffer, onAddMultipleOffers }: OfferFormProps) {
       return
     }
 
+    const extraText = formData.extraText.trim()
+
     const newOffer: Offer = {
       id: Date.now().toString(),
       productName: formData.productName,
       price: formData.price,
       unit: formData.unit,
       createdAt: new Date().toISOString(),
-      extraText: formData.extraText.trim() || undefined,
+      ...(extraText ? { extraText } as Pick<Offer, "extraText"> : {}),
     }
 
     onAddOffer(newOffer)
