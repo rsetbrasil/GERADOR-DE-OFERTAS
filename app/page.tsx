@@ -84,24 +84,17 @@ export default function Home() {
 
   useEffect(() => {
     const userKey = "firebase-anon-user-id"
-    const existingUserId = localStorage.getItem(userKey)
+    const existingUserId = typeof localStorage !== "undefined" ? localStorage.getItem(userKey) : null
     const nextUserId =
       existingUserId ??
       (typeof crypto !== "undefined" && "randomUUID" in crypto
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(16).slice(2)}`)
 
-    if (!existingUserId) localStorage.setItem(userKey, nextUserId)
-    setUserId(nextUserId)
-
-    const savedOffers = localStorage.getItem("promotional-offers")
-    if (!savedOffers) return
-    try {
-      const parsed = JSON.parse(savedOffers)
-      setOffers(parsed)
-    } catch (error) {
-      console.error("Erro ao carregar ofertas salvas:", error)
+    if (!existingUserId && typeof localStorage !== "undefined") {
+      localStorage.setItem(userKey, nextUserId)
     }
+    setUserId(nextUserId)
   }, [])
 
   useEffect(() => {
@@ -120,11 +113,6 @@ export default function Home() {
           .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
 
         setOffers(remoteOffers)
-        if (remoteOffers.length > 0) {
-          localStorage.setItem("promotional-offers", JSON.stringify(remoteOffers))
-        } else {
-          localStorage.removeItem("promotional-offers")
-        }
       },
       (error) => {
         console.error("Erro ao ouvir ofertas do Firebase:", error)
@@ -135,14 +123,6 @@ export default function Home() {
       unsubscribe()
     }
   }, [userId])
-
-  useEffect(() => {
-    if (offers.length > 0) {
-      localStorage.setItem("promotional-offers", JSON.stringify(offers))
-    } else {
-      localStorage.removeItem("promotional-offers")
-    }
-  }, [offers])
 
   const handleAddOffer = (offer: Offer) => {
     setOffers((prev) => [offer, ...prev])
