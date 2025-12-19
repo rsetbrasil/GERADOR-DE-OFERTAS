@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { OfferForm } from "@/components/offer-form"
 import { OfferCard } from "@/components/offer-card"
 import type { Offer } from "@/lib/types"
@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import html2canvas from "html2canvas"
 import { useToast } from "@/hooks/use-toast"
 import { db } from "@/lib/firebase"
-import { collection, deleteDoc, doc, onSnapshot, query, setDoc, writeBatch } from "firebase/firestore"
+import { collection, deleteDoc, doc, getDocs, onSnapshot, query, setDoc, writeBatch } from "firebase/firestore"
 
 export default function Home() {
   const { toast } = useToast()
@@ -17,6 +17,7 @@ export default function Home() {
   const [selectedOffers, setSelectedOffers] = useState<Set<string>>(new Set())
   const [searchTerm, setSearchTerm] = useState("")
   const [userId, setUserId] = useState<string | null>(null)
+  const hasMigratedRef = useRef(false)
 
   const printA4Images = async (images: string[]) => {
     const iframe = document.createElement("iframe")
@@ -98,9 +99,7 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-    if (!userId) return
-
-    const offersQuery = query(collection(db, "users", userId, "offers"))
+    const offersQuery = query(collection(db, "offers"))
 
     const unsubscribe = onSnapshot(
       offersQuery,
@@ -122,12 +121,34 @@ export default function Home() {
     return () => {
       unsubscribe()
     }
+  }, [])
+
+  useEffect(() => {
+    if (!userId || hasMigratedRef.current) return
+    hasMigratedRef.current = true
+
+    const migrateFromUserCollection = async () => {
+      try {
+        const oldSnapshot = await getDocs(collection(db, "users", userId, "offers"))
+        if (oldSnapshot.empty) return
+
+        const batch = writeBatch(db)
+        oldSnapshot.docs.forEach((docSnapshot) => {
+          const data = docSnapshot.data() as Omit<Offer, "id">
+          batch.set(doc(db, "offers", docSnapshot.id), data)
+        })
+        await batch.commit()
+      } catch (error) {
+        console.error("Erro ao migrar ofertas antigas do usuário:", error)
+      }
+    }
+
+    void migrateFromUserCollection()
   }, [userId])
 
   const handleAddOffer = (offer: Offer) => {
     setOffers((prev) => [offer, ...prev])
-    if (!userId) return
-    void setDoc(doc(db, "users", userId, "offers", offer.id), offer).catch(() => {
+    void setDoc(doc(db, "offers", offer.id), offer, { merge: true }).catch(() => {
       toast({
         title: "Falha ao salvar no Firebase",
         description: "Sua oferta foi salva localmente, mas não sincronizou.",
@@ -138,10 +159,9 @@ export default function Home() {
 
   const handleAddMultipleOffers = (newOffers: Offer[]) => {
     setOffers((prev) => [...newOffers, ...prev])
-    if (!userId) return
     const batch = writeBatch(db)
     newOffers.forEach((offer) => {
-      batch.set(doc(db, "users", userId, "offers", offer.id), offer)
+      batch.set(doc(db, "offers", offer.id), offer, { merge: true })
     })
     void batch.commit().catch(() => {
       toast({
@@ -159,8 +179,7 @@ export default function Home() {
       newSet.delete(id)
       return newSet
     })
-    if (!userId) return
-    void deleteDoc(doc(db, "users", userId, "offers", id)).catch(() => {
+    void deleteDoc(doc(db, "offers", id)).catch(() => {
       toast({
         title: "Falha ao remover no Firebase",
         description: "A oferta foi removida localmente, mas não sincronizou.",
@@ -171,8 +190,7 @@ export default function Home() {
 
   const handleUpdateOffer = (updated: Offer) => {
     setOffers((prev) => prev.map((offer) => (offer.id === updated.id ? updated : offer)))
-    if (!userId) return
-    void setDoc(doc(db, "users", userId, "offers", updated.id), updated, { merge: true }).catch(() => {
+    void setDoc(doc(db, "offers", updated.id), updated, { merge: true }).catch(() => {
       toast({
         title: "Falha ao atualizar no Firebase",
         description: "A oferta foi atualizada localmente, mas não sincronizou.",
