@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import html2canvas from "html2canvas"
 import { useToast } from "@/hooks/use-toast"
 import { db } from "@/lib/firebase"
-import { collection, deleteDoc, doc, getDocs, setDoc, writeBatch } from "firebase/firestore"
+import { collection, deleteDoc, doc, onSnapshot, query, setDoc, writeBatch } from "firebase/firestore"
 
 export default function Home() {
   const { toast } = useToast()
@@ -107,9 +107,11 @@ export default function Home() {
   useEffect(() => {
     if (!userId) return
 
-    const load = async () => {
-      try {
-        const snapshot = await getDocs(collection(db, "users", userId, "offers"))
+    const offersQuery = query(collection(db, "users", userId, "offers"))
+
+    const unsubscribe = onSnapshot(
+      offersQuery,
+      (snapshot) => {
         const remoteOffers: Offer[] = snapshot.docs
           .map((d) => {
             const data = d.data() as Omit<Offer, "id">
@@ -117,16 +119,21 @@ export default function Home() {
           })
           .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
 
-        if (remoteOffers.length === 0) return
-
         setOffers(remoteOffers)
-        localStorage.setItem("promotional-offers", JSON.stringify(remoteOffers))
-      } catch (error) {
-        console.error("Erro ao carregar ofertas do Firebase:", error)
-      }
-    }
+        if (remoteOffers.length > 0) {
+          localStorage.setItem("promotional-offers", JSON.stringify(remoteOffers))
+        } else {
+          localStorage.removeItem("promotional-offers")
+        }
+      },
+      (error) => {
+        console.error("Erro ao ouvir ofertas do Firebase:", error)
+      },
+    )
 
-    void load()
+    return () => {
+      unsubscribe()
+    }
   }, [userId])
 
   useEffect(() => {
