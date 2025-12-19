@@ -100,7 +100,7 @@ export function OfferForm({ onAddOffer, onAddMultipleOffers }: OfferFormProps) {
     const extraText = formData.extraText.trim()
 
     const newOffer: Offer = {
-      id: Date.now().toString(),
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       productName: formData.productName,
       price: formData.price,
       unit: formData.unit,
@@ -122,6 +122,11 @@ export function OfferForm({ onAddOffer, onAddMultipleOffers }: OfferFormProps) {
       title: "Oferta criada!",
       description: "Seu cartaz promocional foi criado com sucesso.",
     })
+  }
+
+  const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const formatted = formatCurrencyInput(e.target.value)
+    setFormData((prev) => ({ ...prev, price: formatted }))
   }
 
   const handleParseList = () => {
@@ -643,13 +648,16 @@ export function OfferForm({ onAddOffer, onAddMultipleOffers }: OfferFormProps) {
                   <Label htmlFor="price" className="text-base font-bold text-gray-900">
                     Preço *
                   </Label>
-                  <Input
-                    id="price"
-                    placeholder="9,99"
-                    value={formData.price}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, price: e.target.value }))}
-                    className="border-2 border-gray-300 text-lg"
-                  />
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-bold text-gray-700">R$</div>
+                    <Input
+                      id="price"
+                      value={formData.price}
+                      onChange={handlePriceChange}
+                      placeholder="0,00"
+                      className="border-2 border-gray-300 font-mono text-lg"
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-2">

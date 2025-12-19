@@ -13,3 +13,10 @@ export function generatePromoCode(): string {
   }
   return code
 }
+
+export function formatCurrencyInput(value: string): string {
+  const digits = value.replace(/\D/g, "")
+  if (!digits) return ""
+  const amount = parseInt(digits, 10) / 100
+  return amount.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}

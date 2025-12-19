@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { OfferForm } from "@/components/offer-form"
 import { OfferCard } from "@/components/offer-card"
 import type { Offer } from "@/lib/types"
-import { Tag, Download, Printer } from "lucide-react"
+import { Tag, Download, Printer, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import html2canvas from "html2canvas"
 import { useToast } from "@/hooks/use-toast"
@@ -176,24 +176,43 @@ export default function Home() {
             return
           }
 
-          if (trimmedLine.includes("—") && trimmedLine.includes("R$")) {
-            const parts = trimmedLine.split("—").map((p) => p.trim())
-            if (parts.length >= 2) {
-              const productName = parts[0]
-              const price = parsePrice(parts[1])
+          // More robust splitting: split by "R$"
+          const parts = trimmedLine.split("R$")
+          if (parts.length >= 2) {
+            // Part 0 is the name (possibly with trailing dash)
+            let productName = parts[0].trim()
+            // Remove trailing dashes (em dash, en dash, hyphen)
+            productName = productName.replace(/[—–-]\s*$/, "").trim()
 
-              if (price) {
-                offers.push({
-                  id: `${Date.now()}-${index}`,
-                  productName: productName,
-                  price,
-                  unit: inferredUnit,
-                  createdAt: new Date().toISOString(),
-                })
-              }
+            // Part 1 is the price string
+            const priceRaw = parts[1].trim()
+            // Reconstruct a string for parsePrice or just parse the number directly
+            // parsePrice expects "R$ ..." so let's feed it back or adjust parsePrice
+            // But actually parsePrice just looks for the number pattern.
+            // Let's make parsePrice simpler or just use the raw part.
+            const match = priceRaw.match(/(\d{1,3}(?:\.\d{3})*(?:,\d{2})|\d+(?:[.,]\d+)?)/)
+            const price = match?.[1] ?? ""
+
+            if (productName) {
+              offers.push({
+                id: `${Date.now()}-${index}`,
+                productName: productName,
+                price,
+                unit: inferredUnit,
+                createdAt: new Date().toISOString(),
+              })
             }
           }
         })
+
+        if (offers.length === 0) {
+           toast({
+             title: "Nenhum produto encontrado",
+             description: "A lista de produtos parece estar vazia ou com formato inválido.",
+             variant: "destructive"
+           })
+           return
+        }
 
         if (offers.length > 0) {
           toast({
@@ -201,7 +220,7 @@ export default function Home() {
              description: `Preparando ${offers.length} produtos para importação.`,
           })
           
-          const chunkSize = 10
+          const chunkSize = 250
           const chunks = []
           for (let i = 0; i < offers.length; i += chunkSize) {
             chunks.push(offers.slice(i, i + chunkSize))
@@ -456,6 +475,42 @@ export default function Home() {
     })
   }
 
+  const handleDeleteSelected = async () => {
+    if (selectedOffers.size === 0) return
+
+    const selectedIds = Array.from(selectedOffers)
+    setOffers((prev) => prev.filter((offer) => !selectedOffers.has(offer.id)))
+    setSelectedOffers(new Set())
+
+    try {
+      const chunkSize = 250
+      const chunks = []
+      for (let i = 0; i < selectedIds.length; i += chunkSize) {
+        chunks.push(selectedIds.slice(i, i + chunkSize))
+      }
+
+      for (const chunk of chunks) {
+        const batch = writeBatch(db)
+        chunk.forEach((id) => {
+          batch.delete(doc(db, "offers", id))
+        })
+        await batch.commit()
+      }
+
+      toast({
+        title: "Ofertas excluídas",
+        description: `${selectedIds.length} ofertas foram removidas.`,
+      })
+    } catch (error) {
+      console.error("Erro ao excluir ofertas:", error)
+      toast({
+        title: "Erro ao excluir",
+        description: "Algumas ofertas podem não ter sido removidas do banco de dados.",
+        variant: "destructive",
+      })
+    }
+  }
+
   const handlePrintSelected = async () => {
     if (selectedOffers.size === 0) {
       toast({
@@ -629,6 +684,10 @@ export default function Home() {
                       <Button size="sm" variant="outline" onClick={handlePrintSelected}>
                         <Printer className="mr-2 h-4 w-4" />
                         Imprimir A4 ({selectedOffers.size})
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={handleDeleteSelected}>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Excluir ({selectedOffers.size})
                       </Button>
                       <Button size="sm" onClick={handleDownloadSelected} className="bg-red-600 hover:bg-red-700">
                         <Download className="mr-2 h-4 w-4" />
