@@ -312,7 +312,13 @@ export default function Home() {
 
   const handleUpdateOffer = (updated: Offer) => {
     setOffers((prev) => prev.map((offer) => (offer.id === updated.id ? updated : offer)))
-    void setDoc(doc(db, "offers", updated.id), updated, { merge: true }).catch(() => {
+    
+    const dataToSave: any = { ...updated }
+    if (!updated.extraText) {
+      dataToSave.extraText = deleteField()
+    }
+
+    void setDoc(doc(db, "offers", updated.id), dataToSave, { merge: true }).catch(() => {
       toast({
         title: "Falha ao atualizar no Firebase",
         description: "A oferta foi atualizada localmente, mas não sincronizou.",

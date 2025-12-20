@@ -8,6 +8,7 @@ import { Check, Download, Pencil, Trash2, X } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { useEffect, useRef, useState } from "react"
 import { Checkbox } from "@/components/ui/checkbox"
+import { formatCurrencyInput } from "@/lib/utils"
 
 interface OfferCardProps {
   offer: Offer
@@ -251,7 +252,7 @@ export function OfferCard({ offer, onDelete, onUpdate, selected = false, onToggl
                   <div className="text-sm font-bold text-gray-700">R$</div>
                   <Input
                     value={draftPrice}
-                    onChange={(e) => setDraftPrice(e.target.value)}
+                    onChange={(e) => setDraftPrice(formatCurrencyInput(e.target.value))}
                     className="border-2 border-gray-300"
                   />
                 </div>

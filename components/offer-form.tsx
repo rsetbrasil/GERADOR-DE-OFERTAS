@@ -13,6 +13,7 @@ import type { Offer } from "@/lib/types"
 import { Plus, Upload, FileText, Check, Download, Printer } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { OfferBadge } from "@/components/offer-card"
+import { formatCurrencyInput } from "@/lib/utils"
 
 const IMPORT_DRAFT_STORAGE_KEY = "import-draft-products"
 
